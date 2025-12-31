@@ -169,8 +169,10 @@ export class TradingService {
     this.clobClient = new ClobClient(CLOB_HOST, this.chainId, this.wallet);
 
     // Get or create API credentials
+    // We use derive-first strategy (opposite of official createOrDeriveApiKey)
+    // because most users already have a key, avoiding unnecessary 400 error logs.
     if (!this.credentials) {
-      const creds = await this.clobClient.createOrDeriveApiKey();
+      const creds = await this.deriveOrCreateApiKey();
       this.credentials = {
         key: creds.key,
         secret: creds.secret,
@@ -191,6 +193,29 @@ export class TradingService {
     );
 
     this.initialized = true;
+  }
+
+  /**
+   * Try to derive existing API key first, create new one if not exists.
+   * This is the reverse of official createOrDeriveApiKey() to avoid
+   * 400 "Could not create api key" error log for existing keys.
+   */
+  private async deriveOrCreateApiKey(): Promise<{ key: string; secret: string; passphrase: string }> {
+    // First try to derive existing key (most common case for existing users)
+    const derived = await this.clobClient!.deriveApiKey();
+    if (derived.key) {
+      return derived;
+    }
+
+    // Derive failed (key doesn't exist), create new key (first-time users)
+    const created = await this.clobClient!.createApiKey();
+    if (!created.key) {
+      throw new PolymarketError(
+        ErrorCode.AUTH_FAILED,
+        'Failed to create or derive API key. Wallet may not be registered on Polymarket.'
+      );
+    }
+    return created;
   }
 
   private async ensureInitialized(): Promise<ClobClient> {
